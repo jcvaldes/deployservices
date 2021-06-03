@@ -1,0 +1,201 @@
+version: '3.2'
+services:
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: "marketplace-nginx-proxy-prod"
+    restart: always
+    ports:
+      - 80:80
+      - 443:443
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.2
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ~/data/certs:/etc/nginx/certs:ro
+      - ~/data/vhostd:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - ./config/nginx/proxy.conf:/etc/nginx/nginx.conf
+    labels:
+      - com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy
+  web-prod:
+    image: nginx
+    container_name: "marketplace-web-prod"
+    restart: always
+    expose:
+      - 80
+    environment:
+      - VIRTUAL_HOST=backend.pampaautos.com.ar
+      # - VIRTUAL_PORT=8081
+      - LETSENCRYPT_HOST=pampaautos.com.ar, www.pampaautos.com.ar, backend.pampaautos.com.ar, api.pampaautos.com.ar
+      - LETSENCRYPT_EMAIL=idevkingos@gmail.com
+    # ports:
+    #   - 8081:8081
+    links:
+      - nodeapp-prod
+      - jsreport-prod
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf
+      # - ./config/nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./config/nginx/web.conf:/etc/nginx/conf.d/default.conf
+      - ./client/dist/marketplace:/usr/share/nginx/html:ro
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.3
+
+  home-prod:
+    build:
+      context: ./home
+      dockerfile: Dockerfile
+      args:
+        NODE: 'production'
+    container_name: "marketplace-home-prod"
+    restart: always
+    expose:
+      - 80
+    links:
+      - nodeapp-prod
+    environment:
+      - VIRTUAL_HOST=pampaautos.com.ar, www.pampaautos.com.ar
+      - VIRTUAL_PORT=4000
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.4
+    # volumes:
+      # - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf
+      # - ./config/nginx/home.conf:/etc/nginx/conf.d/default.conf
+      # - ./home/dist/home:/usr/share/nginx/html:ro
+      # - ./home/dist/home/server:/app/server:ro
+      # - ./home/dist/home/browser:/app:ro
+      
+  nodeapp-prod:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      args:
+        NODE: 'production'
+    container_name: "marketplace-server-prod"
+    restart: always
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.5
+    volumes:
+       - ../server/uploads:/backend/uploads
+
+    # ports:
+    #   - 3000:3000
+      # - 4444:4444
+
+    environment:
+      - VIRTUAL_HOST=api.pampaautos.com.ar
+      - VIRTUAL_PORT=3000
+
+    depends_on:
+      - pgsql-prod
+      - mongodb-prod
+      - rabbitmq-prod
+
+  mongodb-prod:
+    image: mongo:latest
+    container_name: "marketplace-mongodb-prod"
+    restart: always
+    hostname: mdb01
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.6
+    volumes:
+      - ~/data/mongoserver-prod-data:/datadb
+    ports:
+      - 27017:27017
+  pgsql-prod:
+    build:
+      context: ./config/pgsql
+      dockerfile: Dockerfile
+    container_name: "marketplace-pgsql-prod"
+    restart: always
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.7
+    restart: always
+    #hostname: db1
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: marketplace_prod
+      POSTGRES_PASSWORD: swordfish60!
+    volumes:
+      - ~/data/pgserver-prod-data:/var/lib/postgresql/data
+  rabbitmq-prod:
+    build:
+      context: ./config/rabbitmq
+      dockerfile: Dockerfile
+    #image: rabbitmq:latest
+    container_name: "marketplace-rabbitmq-prod"
+    hostname: rmq01
+    restart: always
+    ports:
+      - 8079:15672
+      - 5671:5672
+      - 25675:25676
+    volumes:
+      - ~/data/rabbit-prod-data:/var/lib/rabbitmq
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.8
+
+  jsreport-prod:
+    build:
+      context: ./config/jsreport
+      dockerfile: Dockerfile
+    container_name: "marketplace-jsreport-prod"
+    restart: always
+    volumes:
+      - ~/data/jsreport-prod-data:/jsreport
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.9
+    ports:
+      - 9080:5488
+  letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: "marketplace-letsencrypt-prod"
+    restart: always
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx-proxy
+     # - STAGING=true #optional
+    volumes:
+      - ~/data/certs:/etc/nginx/certs:rw
+      - ~/data/vhostd:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+  jenkins:
+    container_name: jenkins
+    image: jenkins/jenkins:lts
+    restart: always
+    hostname: ci01
+    ports:
+      - 9090:8080
+      - 50000:50000
+    environment:
+      - JENKINS_UC_DOWNLOAD=http://ftp-nyc.osuosl.org/pub/jenkins
+    volumes:
+      - ~/docker/volumes/jenkins:/var/jenkins_home
+    networks:
+      production_net:
+        ipv4_address: 172.30.0.10
+volumes:
+  certs:
+  html:
+  vhostd:
+  pgserver-prod-data:
+    driver: local
+  mongoserver-prod-data:
+    driver: local
+
+networks:
+  production_net:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.0.0/16

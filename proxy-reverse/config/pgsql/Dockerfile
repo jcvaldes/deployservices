@@ -1,0 +1,5 @@
+FROM postgres
+
+MAINTAINER Devkingos
+
+EXPOSE 5432
